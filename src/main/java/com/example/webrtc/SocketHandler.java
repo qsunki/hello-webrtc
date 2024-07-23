@@ -21,6 +21,7 @@ public class SocketHandler extends TextWebSocketHandler {
         for (WebSocketSession webSocketSession : sessions) {
             if (webSocketSession.isOpen() && !session.getId().equals(webSocketSession.getId())) {
                 webSocketSession.sendMessage(message);
+                System.out.println(session.getId() + " " + message.getPayload());
             }
         }
     }
