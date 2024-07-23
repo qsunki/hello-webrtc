@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebRTC Signal Server Test</title>
+</head>
+<body>
+<h1>WebRTC Signal Server Test</h1>
+<video id="localVideo" autoplay playsinline></video>
+<video id="remoteVideo" autoplay playsinline></video>
+<button id="startButton">Start</button>
+<button id="callButton" disabled>Call</button>
+<button id="hangupButton" disabled>Hang Up</button>
+<script>
+    let localStream;
+    let pc;
+    const socket = new WebSocket('ws://localhost:8080/socket');
+
+    socket.onmessage = (message) => {
+        const data = JSON.parse(message.data);
+        if (data.type === 'offer') {//handleOffer
+            pc.setRemoteDescription(new RTCSessionDescription(data));
+            pc.createAnswer().then(answer => {
+                pc.setLocalDescription(answer);
+                socket.send(JSON.stringify(answer));
+            });
+        } else if (data.type === 'answer') {//handleAnswer
+            pc.setRemoteDescription(new RTCSessionDescription(data));
+        } else if (data.type === 'candidate') {//handleCandidate
+            pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+    };
+
+    document.getElementById('startButton').onclick = async () => {
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({video: true, audio: true});
+            document.getElementById('localVideo').srcObject = localStream;
+            document.getElementById('callButton').disabled = false;
+        } catch (error) {
+            console.error('Error accessing media devices.', error);
+        }
+    };
+
+    document.getElementById('callButton').onclick = async () => {
+        pc = new RTCPeerConnection();
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+        pc.onicecandidate = event => {
+            if (event.candidate) {
+                socket.send(JSON.stringify({type: 'candidate', candidate: event.candidate}));
+            }
+        };
+
+        pc.ontrack = event => {
+            const [remoteStream] = event.streams;
+            document.getElementById('remoteVideo').srcObject = remoteStream;
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.send(JSON.stringify(offer));
+        document.getElementById('hangupButton').disabled = false;
+    };
+
+    document.getElementById('hangupButton').onclick = () => {
+        pc.close();
+        pc = null;
+        document.getElementById('callButton').disabled = true;
+        document.getElementById('hangupButton').disabled = true;
+    };
+</script>
+</body>
+</html>
