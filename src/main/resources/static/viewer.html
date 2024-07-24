@@ -1,0 +1,92 @@
+<!-- viewer.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
+</head>
+<body>
+<video id="remoteVideo" autoplay playsinline></video>
+<script>
+    const remoteVideo = document.getElementById('remoteVideo');
+    let peerConnection;
+
+    const socket = new SockJS('http://localhost:8080/ws');
+    const stompClient = new StompJs.Client({
+        webSocketFactory: () => socket
+    });
+
+    stompClient.onConnect = (frame) => {
+        stompClient.subscribe('/topic/signals', (message) => {
+            const signal = JSON.parse(message.body);
+            handleSignal(signal);
+        });
+
+        createOffer();
+    };
+
+    stompClient.activate();
+
+    function handleSignal(signal) {
+        console.log("call handleSignal")
+        const signalData = JSON.parse(signal.data);
+        console.log(signal.type)
+        switch (signal.type) {
+            case 'answer':
+                handleAnswer(signalData);
+                break;
+            case 'candidateP':
+                addCandidate(signalData);
+                break;
+        }
+    }
+
+    function createOffer() {
+        console.log("call createOffer")
+        peerConnection = new RTCPeerConnection();
+        peerConnection.createOffer({offerToReceiveAudio: true, offerToReceiveVideo: true}).then(async offer => {
+            console.log('offer is created ', offer)
+            await peerConnection.setLocalDescription(offer);
+            console.log(peerConnection)
+            console.log(peerConnection.localDescription)
+            stompClient.publish({
+                destination: '/app/send',
+                body: JSON.stringify({type: 'offer', data: JSON.stringify(offer)})
+            });
+        });
+
+        peerConnection.onicecandidate = event => {
+            console.log('icecandidate event occurred ', event)
+            if (event.candidate) {
+                stompClient.publish({
+                    destination: '/app/send',
+                    body: JSON.stringify({type: 'candidateV', data: JSON.stringify(event.candidate)})
+                });
+            }
+        };;
+        peerConnection.ontrack = event => {
+            console.log('ontrack event occurred')
+            const [remoteStream] = event.streams;
+            console.log(event.streams)
+            console.log(remoteStream)
+            remoteVideo.srcObject = remoteStream;
+            // remoteVideo.srcObject = event.streams[0];
+        };
+    }
+
+    function handleAnswer(answer) {
+        console.log('call handleAnswer')
+        console.log('answer is ', answer)
+        peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        console.log(peerConnection)
+    }
+
+    function addCandidate(candidate) {
+        console.log('call addCandidate')
+        console.log('candidate is ', candidate)
+        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+</script>
+</body>
+</html>
