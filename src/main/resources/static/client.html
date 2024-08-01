@@ -1,15 +1,16 @@
-<!-- viewer.html -->
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
     <title>Video Viewer</title>
     <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
 </head>
 <body>
+<button id="startButton">Start</button>
 <video id="remoteVideo" autoplay playsinline></video>
 <script>
     const remoteVideo = document.getElementById('remoteVideo');
+    const startButton = document.getElementById('startButton');
     let peerConnection;
 
     const socket = new SockJS('http://localhost:8080/ws');
@@ -18,73 +19,75 @@
     });
 
     stompClient.onConnect = (frame) => {
-        stompClient.subscribe('/topic/signals', (message) => {
+        stompClient.subscribe('/sub/client/123', (message) => {
             const signal = JSON.parse(message.body);
             handleSignal(signal);
         });
-
-        createOffer();
     };
 
     stompClient.activate();
 
     function handleSignal(signal) {
-        console.log("call handleSignal")
-        const signalData = JSON.parse(signal.data);
-        console.log(signal.type)
+        console.log(`call handleSignal, type: ${signal.type}`);
         switch (signal.type) {
             case 'answer':
-                handleAnswer(signalData);
+                handleAnswer(signal.data);
                 break;
-            case 'candidateP':
-                addCandidate(signalData);
+            case 'candidate':
+                addCandidate(signal.data);
                 break;
         }
     }
 
-    function createOffer() {
-        console.log("call createOffer")
+    startButton.addEventListener('click', () => {
+        sendOffer();
+    });
+
+    function sendOffer() {
+        console.log("call sendOffer");
         peerConnection = new RTCPeerConnection();
-        peerConnection.createOffer({offerToReceiveAudio: true, offerToReceiveVideo: true}).then(async offer => {
-            console.log('offer is created ', offer)
+        peerConnection.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true }).then(async offer => {
+            console.log('offer is created ', offer);
             await peerConnection.setLocalDescription(offer);
-            console.log(peerConnection)
-            console.log(peerConnection.localDescription)
+            console.log(peerConnection);
             stompClient.publish({
-                destination: '/app/send',
-                body: JSON.stringify({type: 'offer', data: JSON.stringify(offer)})
+                destination: '/pub/client/123',
+                body: JSON.stringify({ type: 'offer', data: offer })
             });
         });
 
         peerConnection.onicecandidate = event => {
-            console.log('icecandidate event occurred ', event)
+            console.log('icecandidate event occurred ', event);
+            console.log(`on icecandidate: ${event.candidate}`);
             if (event.candidate) {
+                console.log('publish candidate message');
                 stompClient.publish({
-                    destination: '/app/send',
-                    body: JSON.stringify({type: 'candidateV', data: JSON.stringify(event.candidate)})
+                    destination: '/pub/client/123',
+                    body: JSON.stringify({ type: 'candidate', data: event.candidate })
                 });
             }
-        };;
+        };
+
         peerConnection.ontrack = event => {
-            console.log('ontrack event occurred')
+            console.log('ontrack event occurred');
             const [remoteStream] = event.streams;
-            console.log(event.streams)
-            console.log(remoteStream)
+            console.log(event.streams);
+            console.log(remoteStream);
             remoteVideo.srcObject = remoteStream;
-            // remoteVideo.srcObject = event.streams[0];
+            remoteVideo.play();
         };
     }
 
     function handleAnswer(answer) {
-        console.log('call handleAnswer')
-        console.log('answer is ', answer)
+        console.log('call handleAnswer');
+        console.log('answer is ', answer);
         peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-        console.log(peerConnection)
+        console.log(peerConnection);
     }
 
     function addCandidate(candidate) {
-        console.log('call addCandidate')
-        console.log('candidate is ', candidate)
+        console.log('call addCandidate');
+        console.log('candidate is ', candidate);
         peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     }
 </script>
