@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <title>Video client</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
+</head>
+<body>
+<video id="remoteVideo" autoplay playsinline></video>
+<script>
+    const remoteVideo = document.getElementById('remoteVideo');
+    let peerConnection;
+
+    const socket = new SockJS('https://i11a605.p.ssafy.io/ws');
+    const stompClient = new StompJs.Client({
+        webSocketFactory: () => socket
+    });
+
+    async function handleOffer(offer) {
+        peerConnection = new RTCPeerConnection({
+            iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
+        });
+
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                stompClient.publish({
+                    destination: '/pub/client/222',
+                    body: JSON.stringify({type: 'candidate', data: event.candidate})
+                });
+            }
+        };
+
+        peerConnection.ontrack = (event) => {
+            remoteVideo.srcObject = event.streams[0];
+        };
+
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+
+
+        stompClient.publish({
+            destination: '/pub/client/222',
+            body: JSON.stringify({type: 'answer', data: peerConnection.localDescription})
+        });
+    }
+
+    async function addCandidate(candidate) {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+
+    function handleSignal(signal) {
+        switch (signal.type) {
+            case 'offer':
+                handleOffer(signal.data);
+                break;
+            case 'candidate':
+                addCandidate(signal.data);
+                break;
+        }
+    }
+
+    stompClient.onConnect = (frame) => {
+        stompClient.subscribe('/sub/client/222', (message) => {
+            const signal = JSON.parse(message.body);
+            handleSignal(signal);
+        });
+    };
+
+    stompClient.activate();
+</script>
+</body>
+</html>
