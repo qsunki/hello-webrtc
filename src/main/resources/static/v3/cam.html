@@ -1,19 +1,19 @@
-<!-- cam.html -->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <title>Video Provider</title>
+    <title>Video cam</title>
     <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
 </head>
 <body>
+<button id="startButton" onclick=sendOffer()>Start</button>
 <video id="localVideo" autoplay playsinline></video>
 <script>
     const localVideo = document.getElementById('localVideo');
     let localStream;
-    let peerConnections = {};
+    let peerConnection;
 
-    const socket = new SockJS('http://localhost:8080/ws');
+    const socket = new SockJS('https://i11a605.p.ssafy.io/ws');
     const stompClient = new StompJs.Client({
         webSocketFactory: () => socket
     });
@@ -26,8 +26,7 @@
     });
 
     stompClient.onConnect = (frame) => {
-        stompClient.subscribe('/sub/cam/123', (message) => {
-            console.log('message is ', message)
+        stompClient.subscribe('/sub/cam/222', (message) => {
             const signal = JSON.parse(message.body);
             handleSignal(signal);
         });
@@ -36,54 +35,52 @@
     stompClient.activate();
 
     function handleSignal(signal) {
-        console.log("call handleSignal")
-        console.log('signal is ', signal)
-        const signalData = signal.data;
-        console.log(signal.type)
-
         switch (signal.type) {
-            case 'offer':
-                createAnswer(signalData);
+            case 'answer':
+                handleAnswer(signal.data);
                 break;
             case 'candidate':
-                addCandidate(signalData);
+                addCandidate(signal.data);
                 break;
         }
     }
 
-    function createAnswer(offer) {
-        console.log("call createAnswer")
-        console.log('offer is ', offer)
-        const peerConnection = new RTCPeerConnection();
+    function sendOffer() {
+        peerConnection = new RTCPeerConnection({
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' }
+            ]
+        });
+
         peerConnection.onicecandidate = event => {
-            console.log('icecandidate event occurred ', event)
             if (event.candidate) {
                 stompClient.publish({
-                    destination: '/pub/cam/123',
+                    destination: '/pub/cam/222',
                     body: JSON.stringify({ type: 'candidate', data: event.candidate })
                 });
             }
         };
+
         localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-        peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-        // peerConnection.setRemoteDescription(offer);
-        peerConnection.createAnswer({offerToReceiveAudio: true, offerToReceiveVideo: true}).then(answer => {
-            peerConnection.setLocalDescription(answer);
+
+        peerConnection.createOffer().then(offer => {
+            return peerConnection.setLocalDescription(offer);
+        }).then(() => {
             stompClient.publish({
-                destination: '/pub/cam/123',
-                body: JSON.stringify({ type: 'answer', data: answer })
+                destination: '/pub/cam/222',
+                body: JSON.stringify({ type: 'offer', data: peerConnection.localDescription })
             });
+        }).catch(error => {
+            console.error('Error creating offer.', error);
         });
+    }
 
-
-
-        peerConnections[offer.sender] = peerConnection;
+    function handleAnswer(answer) {
+        peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
     }
 
     function addCandidate(candidate) {
-        console.log("call addCandidate")
-        console.log('candidate is ', candidate)
-        peerConnections[candidate.sender].addIceCandidate(new RTCIceCandidate(candidate));
+        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     }
 </script>
 </body>

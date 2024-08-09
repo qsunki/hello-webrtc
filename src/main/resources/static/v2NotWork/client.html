@@ -1,0 +1,89 @@
+<!--client.html-->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <title>Video Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
+</head>
+<body>
+<video id="remoteVideo" autoplay playsinline></video>
+<script>
+    const remoteVideo = document.getElementById('remoteVideo');
+    let peerConnection;
+
+    const socket = new SockJS('https://i11a605.p.ssafy.io/ws');
+    const stompClient = new StompJs.Client({
+        webSocketFactory: () => socket
+    });
+
+    stompClient.onConnect = (frame) => {
+        stompClient.subscribe('/sub/client/222', (message) => {
+            const signal = JSON.parse(message.body);
+            handleSignal(signal);
+        });
+    };
+
+    stompClient.activate();
+
+    function handleSignal(signal) {
+        console.log(`call handleSignal, type: ${signal.type}`);
+        switch (signal.type) {
+            case 'offer':
+                createAnswer(signal.data);
+                break;
+            case 'candidate':
+                addCandidate(signal.data);
+                break;
+        }
+    }
+
+    function createAnswer(offer) {
+        console.log('offer is ', offer);
+        peerConnection = new RTCPeerConnection();
+        peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        peerConnection.onicecandidate = event => {
+            console.log('icecandidate event occurred ', event);
+            console.log(`on icecandidate: ${event.candidate}`);
+            if (event.candidate) {
+                console.log('publish candidate message');
+                stompClient.publish({
+                    destination: '/pub/client/222',
+                    body: JSON.stringify({type: 'candidate', data: event.candidate})
+                });
+            }
+        };
+
+        peerConnection.ontrack = event => {
+            console.log('ontrack event occurred');
+            const [remoteStream] = event.streams;
+            console.log(event.streams);
+            console.log(remoteStream);
+            remoteVideo.srcObject = remoteStream;
+            remoteVideo.play();
+        };
+
+        peerConnection.onicegatheringstatechange = () => {
+            console.log('ICE gathering state: ', peerConnection.iceGatheringState);
+        };
+
+        console.log(peerConnection);
+
+        peerConnection.createAnswer({offerToReceiveAudio: true, offerToReceiveVideo: true}).then(answer => {
+            console.log('call createAnswer');
+            peerConnection.setLocalDescription(answer);
+            stompClient.publish({
+                destination: '/pub/client/222',
+                body: JSON.stringify({type: 'answer', data: answer})
+            });
+        });
+    }
+
+    function addCandidate(candidate) {
+        console.log('call addCandidate');
+        console.log('candidate is ', candidate);
+        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+</script>
+</body>
+</html>
